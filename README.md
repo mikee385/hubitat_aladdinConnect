@@ -14,7 +14,7 @@ Note that all operations have a cloud (internet) interaction.  This implementati
 # Usage instructions:
 
 * Use the Garage Door (control) template in Hubitat Dashboard.
-* Install HSM (Hubitat Safety Monitor) from the built-in apps, then look for the HSM, Garage Doors, Locks and Valves section to control the door in Rule Machine.
+* Create actions in the HSM, Garage Doors, Locks and Valves section to control the door in Rule Machine.  Note that you may need to install HSM if that option does not appear in actions in Rule Machine.
 
 # Disclaimer
 
