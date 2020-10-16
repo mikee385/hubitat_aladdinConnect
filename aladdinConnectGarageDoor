@@ -78,6 +78,7 @@ def refreshFromMaster(doorNum, doorState)
         case "3":
         case "6":
         case "7":
+        default:
             stateVal = "unknown"
             break
         case "1":
@@ -99,8 +100,10 @@ def refreshFromMaster(doorNum, doorState)
     }    
     sendEvent(name: "door", value: stateVal)
     
-    sendEvent(name: "battery", value: doorState.doorBattery.toInteger())
-    sendEvent(name: "rssi", value: doorState.doorBLE.toInteger())
+    sendEvent(name: "battery", value: doorState.doorBattery)
+    sendEvent(name: "rssi", value: doorState.doorBLE)
+    
+    sendEvent(name: "commStatus", value: "good")
 }
 
 def close()
