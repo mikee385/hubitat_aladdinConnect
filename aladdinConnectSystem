@@ -117,10 +117,10 @@ def refreshDoorInfo()
                     {
                         doorState =
                             [
-                            doorStatus: doorInfo[3*i-3].result[0][1],
-                            doorBattery: doorInfo[3*(i-1)+10].result[0][1],
-                            doorBLE: doorInfo[3*(i-1)+11].result[0][1],
-                            doorTemp: doorInfo[3*(i-1)+12].result[0][1],
+                            doorStatus: (doorInfo[3*i-3].result.isEmpty() ? "unknown" : doorInfo[3*i-3].result[0][1]),
+                            doorBattery: (doorInfo[3*(i-1)+10].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+10].result[0][1]),
+                            doorBLE: (doorInfo[3*(i-1)+11].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+11].result[0][1]),
+                            doorTemp: (doorInfo[3*(i-1)+12].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+12].result[0][1]),
                             ]
                         // update child device
                         logDebug("updating door: ${i} on child: ${child} with state: ${doorState}")
