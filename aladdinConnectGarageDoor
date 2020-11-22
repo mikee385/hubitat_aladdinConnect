@@ -34,6 +34,7 @@ preferences
     section
     {
         input name: "doorNumber", type: "text", title: "Door number (1-3)", required: true
+        input name: "openerNumber", type: "text", title: "Opener number", required: true
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -66,9 +67,16 @@ def initialize()
 
 def refreshFromMaster(doorNum, doorState)
 {
-    if(doorNum.toString() != doorNumber)
+    def doorVals = doorNum.toString().padLeft(2, "0").split("(?!^)")
+    
+    if(doorVals[1].toString() != doorNumber)
     {
-        device.updateSetting("doorNumber", doorNum.toString())
+        device.updateSetting("doorNumber", doorVals[1].toString())
+    }
+    
+    if(doorVals[0].toString() != openerNumber)
+    {
+        device.updateSetting("openerNumber", doorVals[0].toString())
     }
     
     def stateVal = ""
@@ -200,7 +208,7 @@ def genDoorStateReq(doorState)
     {
     "auth": {
         "cik": "${parent.getPortalKey()}",
-        "client_id": "${parent.getDevices()[0]}"
+        "client_id": "${parent.getDevices()[openerNumber.toInteger()]}"
     },
     "calls": [
     	{
