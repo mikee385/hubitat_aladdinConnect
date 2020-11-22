@@ -96,35 +96,40 @@ def refreshDoorInfo()
     {
         // query door info for all devices
         def postParams = genParamsPost()
-        postParams['body'] = genDoorInfoReq()
-        def doorInfo = httpPostExec(postParams, true)
-        
-        if(doorInfo)
+        for(j = 0; j < getDevices().size(); j++)
         {
-            sendEvent(name: "commStatus", value: "good")
+            postParams['body'] = genDoorInfoReq(j)
+            def doorInfo = httpPostExec(postParams, true)
             
-            sendEvent(name: "rssi", value: (doorInfo[9].result.isEmpty() ? "unknown" : doorInfo[9].result[0][1].toInteger()))
-            
-            def child
-            for(i = 1; i < 4; i++)
+            if(doorInfo)
             {
-                if(!doorInfo[3*i-2].result.isEmpty())
+                sendEvent(name: "commStatus", value: "good")
+                
+                sendEvent(name: "rssi", value: (doorInfo[9].result.isEmpty() ? "unknown" : doorInfo[9].result[0][1].toInteger()))
+                
+                def child
+                def doorDevName
+                for(i = 1; i < 4; i++)
                 {
-                    logDebug("managing door: ${i}")
-                    child = manageDoorDevice(i.toString())
-                    def doorState = [:]
-                    if(child)
+                    if(!doorInfo[3*i-2].result.isEmpty())
                     {
-                        doorState =
-                            [
-                            doorStatus: (doorInfo[3*i-3].result.isEmpty() ? "unknown" : doorInfo[3*i-3].result[0][1]),
-                            doorBattery: (doorInfo[3*(i-1)+10].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+10].result[0][1]),
-                            doorBLE: (doorInfo[3*(i-1)+11].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+11].result[0][1]),
-                            doorTemp: (doorInfo[3*(i-1)+12].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+12].result[0][1]),
-                            ]
-                        // update child device
-                        logDebug("updating door: ${i} on child: ${child} with state: ${doorState}")
-                        child.refreshFromMaster(i.toString(), doorState)
+                        doorDevName = (j == 0 ? "${i}" : "${j}${i}") 
+                        logDebug("managing door: ${doorDevName}")
+                        child = manageDoorDevice(doorDevName.toString())
+                        def doorState = [:]
+                        if(child)
+                        {
+                            doorState =
+                                [
+                                    doorStatus: (doorInfo[3*i-3].result.isEmpty() ? "unknown" : doorInfo[3*i-3].result[0][1]),
+                                    doorBattery: (doorInfo[3*(i-1)+10].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+10].result[0][1]),
+                                    doorBLE: (doorInfo[3*(i-1)+11].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+11].result[0][1]),
+                                    doorTemp: (doorInfo[3*(i-1)+12].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+12].result[0][1]),
+                                ]
+                            // update child device
+                            logDebug("updating door: ${doorDevName} on child: ${child} with state: ${doorState}")
+                            child.refreshFromMaster(doorDevName.toString(), doorState)
+                        }
                     }
                 }
             }
@@ -347,13 +352,18 @@ def genParamsPost()
 
 def genDoorInfoReq()
 {
+    genDoorInfoReq(0)
+}
+
+def genDoorInfoReq(doorNum)
+{
     // NOTE: do not change the order of these requests
     //   add more at the end if needed
     def req = """
     {
     "auth": {
         "cik": "${getPortalKey()}",
-        "client_id": "${getDevices()[0]}"
+        "client_id": "${getDevices()[doorNum]}"
     },
     "calls": [
         {
