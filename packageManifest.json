@@ -1,0 +1,27 @@
+{
+  "packageName": "hubitat_aladdinConnect",
+  "author": "tomw",
+  "version": "1.1.0",
+  "minimumHEVersion": "2.1.9",
+  "dateReleased": "2020-08-03",
+  "drivers": [
+    {
+      "id": "78cb48cc-a805-4de5-9c3d-6e5c3d55433f",
+      "name": "Aladdin Connect System",
+      "namespace": "tomw",
+      "location": "https://raw.githubusercontent.com/tomwpublic/hubitat_aladdinConnect/master/aladdinConnectSystem",
+      "required": true
+    },
+    {
+      "id": "4c9ffb65-ad42-457f-a208-f2dcf27b90a0",
+      "name": "Aladdin Connect Garage Door",
+      "namespace": "tomw",
+      "location": "https://raw.githubusercontent.com/tomwpublic/hubitat_aladdinConnect/master/aladdinConnectGarageDoor",
+      "required": true
+    }
+  ],
+  "licenseFile": "https://raw.githubusercontent.com/tomwpublic/hubitat_aladdinConnect/master/LICENSE",
+  "releaseNotes": "1.1.0 - @tomw - Added support for multiple openers.\n1.0.0 - @tomw - Initial release.",
+  "documentationLink": "https://github.com/tomwpublic/hubitat_aladdinConnect/blob/master/README.md",
+  "communityLink": "https://community.hubitat.com/t/is-it-possible-to-use-rm4-to-control-report-on-my-genie-aladdin-garage-based-on-postman-success/45619/6"
+}
