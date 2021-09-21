@@ -16,8 +16,9 @@ limitations under the License.
 
 Change history:
 
-1.1.0 - @tomw - Added support for multiple openers.
-1.0.0 - @tomw - Initial release.
+1.1.1 - tomw - Added Actuator for compatibility.
+1.1.0 - tomw - Added support for multiple openers.
+1.0.0 - tomw - Initial release.
 
  */
 
@@ -25,6 +26,7 @@ metadata
 {
     definition(name: "Aladdin Connect System", namespace: "tomw", author: "tomw", importUrl: "")
     {
+        capability "Actuator"
         capability "Configuration"
         capability "Initialize"
         capability "Refresh"
