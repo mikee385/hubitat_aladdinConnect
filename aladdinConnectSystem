@@ -16,6 +16,7 @@ limitations under the License.
 
 Change history:
 
+1.1.2 - tomw - Support both seconds and minutes for refreshInterval.
 1.1.1 - tomw - Added Actuator for compatibility.
 1.1.0 - tomw - Added support for multiple openers.
 1.0.0 - tomw - Initial release.
@@ -40,9 +41,10 @@ preferences
 {
     section
     {
-        input "username", "text", title: "Username (email)", required: true
-        input "password", "password", title: "Password", required: true
-        input "refreshInterval", "number", title: "Refresh interval (minutes)", defaultValue: 5
+        input name: "username", type: "text", title: "Username (email)", required: true
+        input name: "password", type: "password", title: "Password", required: true
+        input name: "refreshInterval", type: "number", title: "Refresh interval", defaultValue: 5
+        input name: "refreshIntervalS", type: "bool", title: "Use seconds for refresh interval? (false for minutes)", defaultValue: false 
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -160,6 +162,13 @@ def uninstalled()
 {
 }
 
+def refreshPeriod()
+{
+    def basePeriod = refreshInterval.toFloat().toInteger()
+    
+    return refreshIntervalS ? basePeriod : basePeriod * 60
+}
+
 def refresh()
 {
     unschedule()
@@ -175,7 +184,7 @@ def refresh()
     }
     
     // schedule next refresh
-    runIn((60*refreshInterval.toFloat().toInteger()), refresh)
+    runIn(refreshPeriod(), refresh)
 }
 
 def refreshFromChild()
@@ -184,7 +193,7 @@ def refreshFromChild()
     refreshDoorInfo()
     
     // schedule next refresh
-    runIn((60*refreshInterval.toFloat().toInteger()), refresh)
+    runIn(refreshPeriod(), refresh)
 }
 
 def checkCommStatus()
