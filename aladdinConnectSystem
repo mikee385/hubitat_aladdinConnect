@@ -16,6 +16,7 @@ limitations under the License.
 
 Change history:
 
+1.2.0(dev) - tomw - Update to new API flow 
 1.1.2 - tomw - Support both seconds and minutes for refreshInterval.
 1.1.1 - tomw - Added Actuator for compatibility.
 1.1.0 - tomw - Added support for multiple openers.
@@ -34,6 +35,10 @@ metadata
         capability "SignalStrength"
         
         attribute "commStatus", "string"
+        
+        command "TEMP_closeDoor", ["device_id", "door_number"]
+        command "TEMP_openDoor", ["device_id", "door_number"]
+        
     }
 }
 
@@ -47,6 +52,10 @@ preferences
         input name: "refreshIntervalS", type: "bool", title: "Use seconds for refresh interval? (false for minutes)", defaultValue: false 
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
     }
+    section
+    {
+        input name: "useNew", type: "bool", title: "Use new API server?", required: true, defaultValue: false      
+    }
 }
 
 def logDebug(msg) 
@@ -57,9 +66,108 @@ def logDebug(msg)
     }
 }
 
+def TEMP_closeDoor(deviceID, doorNum)
+{
+    logDebug("CLOSING")
+    operateDoor("close", deviceID, doorNum)
+}
+
+def TEMP_openDoor(deviceID, doorNum)
+{
+    logDebug("OPENING")
+    operateDoor("open", deviceID, doorNum)
+}
+
+def operateDoor(op, deviceID, doorNum)
+{
+    payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
+
+    httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
+}
+
+def login()
+{
+    def body = 
+    [
+        grant_type: "password",
+        client_id: "1000",
+        brand: "ALADDIN",
+        username: java.net.URLEncoder.encode(username, "UTF-8"),
+        password: password.getBytes("UTF-8").encodeBase64().toString(),        
+        platform: "platform",
+        app_version: "5.25",
+        build_number: "2038",
+        os_version: "12.0.0"
+    ]
+    
+    def resp = httpAccess("POST", (genParamsApi("oauth/token", "text", body)))
+    
+    if(resp)
+    {
+        setToken(resp.data.access_token)
+    }
+}
+
+def get_devices()
+{
+    def resp = httpAccess("GET", genParamsApi("configuration", "text"))
+    
+    //resp = [data: [devices:[[is_locked:false, family:2, id:77751, legacy_id:F0AD4E0F20B3, ssid:RoamAtHome, doors:[[desired_door_status_outcome:success, updated_at:"", desired_door_status:Open, id:87651, user_id:29314, vehicle_color:OTHER, door_index:1, icon:1, link_status:3, door_updated_at:"2022-02-07T02:07:27Z", created_at:"2020-09-16T08:06:49Z", desired_status:99, status:4, fault:0, ble_strength:0, is_enabled:true, battery_level:0, device_id:77751, name:"Garage door", vehicle_type:OTHER]]]]]]    
+
+    if(resp)
+    {
+        def devices = []
+        for(device in resp.data.devices)
+        {
+            logDebug device
+            def doors = []
+            for(door in device.doors)
+            {
+                doors +=
+                    [
+                        device_id: device.id,
+                        door_number: door.door_index,
+                        name: door.name,
+                        status: door.status,
+                        link_status: door.link_status
+                    ]
+            }
+            devices +=
+                [
+                    device_id: device.id,
+                    doors: doors
+                ]
+        }
+        
+        setDevices(devices)
+    }    
+}
+
+def update_doors()
+{
+    def devices = getDevices()
+    
+    def child
+    
+    if(devices)
+    {
+        devices.each
+        {
+            it.doors.each
+            {
+                child = manageDoorDevice("${it.device_id}:${it.door_number}")
+                if(child)
+                {
+                    logDebug("logging child ${it.device_id}:${it.door_number}")
+                }
+            }            
+        }
+    }
+}
+
 def updated()
 {
-    configure()
+    //configure()
 }
 
 def configure()
@@ -103,6 +211,13 @@ def refreshDoorInfo()
 {
     try
     {
+        if(useNew)
+        {
+            get_devices()
+            update_doors()
+            return
+        }
+        
         // query door info for all devices
         def postParams = genParamsPost()
         for(j = 0; j < getDevices().size(); j++)
@@ -175,7 +290,7 @@ def refresh()
     
     try
     {
-        refreshTokens()
+        useNew ? login() : refreshTokens()        
         refreshDoorInfo()
     }
     catch (Exception e)
@@ -277,37 +392,62 @@ def getBasePostURI()
     return "https://genie.m2.exosite.com/onep:v1/rpc/process"
 }
 
-def findDoorDevice(name)
-{
-    return getChildDevice(childDoorName(name))
-}
-
-def createDoorDevice(name)
-{
-    return addChildDevice("Aladdin Connect Garage Door", childDoorName(name), [label:"${childDoorName(name)}", isComponent:true, name:"${childDoorName(name)}"])
-}
-
 def manageDoorDevice(name)
 {
-    def child = findDoorDevice(name)
-    if(child)
-    {
-        // use existing child if it exists...
-        logDebug("found existing child: ${child}")
-    }
-    else
-    {
-        // create child if it didn't exist...
-        child = createDoorDevice(name)
-        logDebug("created new child: ${child}")
-    }
-    
-    return child
+    // use existing child, or create it
+    return getChildDevice(childDoorName(name)) ?: 
+        addChildDevice("Aladdin Connect Garage Door", childDoorName(name), [label:"${childDoorName(name)}", isComponent:true, name:"${childDoorName(name)}"])
 }
 
 def childDoorName(name)
 {
     return "${device.getName()}-${name}"
+}
+
+String toQueryString(Map m)
+{
+    return m.collect{ k, v -> "${k}=${v.toString()}" }.sort().join("&")
+}
+
+def getAWSURI()
+{
+    return "https://pxdqkls7aj.execute-api.us-east-1.amazonaws.com/Android"
+}
+
+def genParamsApi(endpoint, type, body = null)
+{
+    def params =
+        [
+            uri: getAWSURI() + "/" + endpoint,
+            headers:
+            [
+                AppVersion: '5.25',
+                BundleName: 'com.geniecompany.AladdinConnect',
+                'User-Agent': 'okhttp/3.12.1',
+                'BuildVersion': '131',
+                'X-Api-Key': 'fkowarQ0dX9Gj1cbB9Xkx1yXZkd6bzVn5x24sECW',
+                'Content-Type': (type == "text") ? 'application/x-www-form-urlencoded' : 'application/json',
+                Authorization: "Bearer ${getToken()}"
+            ],
+            
+            requestContentType: (type == "text") ? 'application/x-www-form-urlencoded' : 'application/json',
+        ]
+    
+    if(body)
+    {
+        switch(type)
+        {
+            case "text":
+                params.body = toQueryString(body)
+                break
+            
+            case "json":
+                params.body = new groovy.json.JsonOutput().toJson(body)
+                break
+        }
+    }
+ 
+    return params
 }
 
 def genParamsPre()
@@ -632,4 +772,36 @@ def httpPostExec(params, throwToCaller = false)
             throw(e)
         }
     }
+}
+
+def httpAccess(op, params)
+{    
+    def result = null
+    
+    logDebug("httpAccess(${op}, ${params})")
+    
+    def httpClosure = 
+    { resp ->
+        result = resp
+        logDebug("result.data = ${result.data}")
+    }    
+	
+    try
+    {
+        switch(op)
+        {
+            case "POST":
+                httpPost(params, httpClosure)
+                break
+            case "GET":
+                httpGet(params, httpClosure)
+                break
+        }
+    }
+    catch(Exception e)
+    {
+        log.error "httpAccess(${op}, ${params}) error: ${e.message}"
+    }
+    
+    return result
 }
