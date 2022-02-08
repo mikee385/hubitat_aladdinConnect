@@ -52,10 +52,6 @@ preferences
         input name: "refreshIntervalS", type: "bool", title: "Use seconds for refresh interval? (false for minutes)", defaultValue: false 
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
     }
-    section
-    {
-        input name: "useNew", type: "bool", title: "Use new API server?", required: true, defaultValue: false      
-    }
 }
 
 def logDebug(msg) 
@@ -179,85 +175,14 @@ def configure()
     initialize()
 }
 
-def refreshTokens()
-{
-    try
-    {
-        // retrieve and store user token
-        setToken(httpGetExec(genParamsPre(), true))
-        
-        // retrieve and store user ID
-        setUserId(httpGetExec(genParamsToken("users/_this"), true)?.id)
-        
-        // retrieve and store portal ID
-        setPortalId(httpGetExec(genParamsToken("users/${getUserId()}/portals"), true)[0].PortalID)
-        
-        // retrieve and store devices and portal key
-        def portalDetails = httpGetExec(genParamsToken("portals/${getPortalId()}"), true)
-        setDevices(portalDetails.devices)
-        setPortalKey(portalDetails.info.key)
-        
-        sendEvent(name: "commStatus", value: "good")
-    }
-    catch (Exception e)
-    {
-        logDebug("refreshTokens() failed")
-        sendEvent(name: "commStatus", value: "error")
-        throw(e)
-    }
-}
-
 def refreshDoorInfo()
 {
     try
     {
-        if(useNew)
-        {
-            get_devices()
-            update_doors()
-            return
-        }
+        get_devices()
+        update_doors()
         
-        // query door info for all devices
-        def postParams = genParamsPost()
-        for(j = 0; j < getDevices().size(); j++)
-        {
-            postParams['body'] = genDoorInfoReq(j)
-            def doorInfo = httpPostExec(postParams, true)
-            
-            if(doorInfo)
-            {
-                sendEvent(name: "commStatus", value: "good")
-                
-                sendEvent(name: "rssi", value: (doorInfo[9].result.isEmpty() ? "unknown" : doorInfo[9].result[0][1].toInteger()))
-                
-                def child
-                def doorDevName
-                for(i = 1; i < 4; i++)
-                {
-                    if(!doorInfo[3*i-2].result.isEmpty())
-                    {
-                        doorDevName = (j == 0 ? "${i}" : "${j}${i}") 
-                        logDebug("managing door: ${doorDevName}")
-                        child = manageDoorDevice(doorDevName.toString())
-                        def doorState = [:]
-                        if(child)
-                        {
-                            doorState =
-                                [
-                                    doorStatus: (doorInfo[3*i-3].result.isEmpty() ? "unknown" : doorInfo[3*i-3].result[0][1]),
-                                    doorBattery: (doorInfo[3*(i-1)+10].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+10].result[0][1]),
-                                    doorBLE: (doorInfo[3*(i-1)+11].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+11].result[0][1]),
-                                    doorTemp: (doorInfo[3*(i-1)+12].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+12].result[0][1]),
-                                ]
-                            // update child device
-                            logDebug("updating door: ${doorDevName} on child: ${child} with state: ${doorState}")
-                            child.refreshFromMaster(doorDevName.toString(), doorState)
-                        }
-                    }
-                }
-            }
-        }
+        return
     }
     catch (Exception e)
     {
@@ -290,8 +215,10 @@ def refresh()
     
     try
     {
-        useNew ? login() : refreshTokens()        
+        // TODO: do try refresh-login-refresh
+        login()    
         refreshDoorInfo()
+        
     }
     catch (Exception e)
     {
@@ -337,26 +264,6 @@ def getToken()
     return state.token
 }
 
-def setUserId(id)
-{
-    state.userId = id
-}
-
-def getUserId()
-{
-    return state.userId
-}
-
-def setPortalId(id)
-{
-    state.portalId = id
-}
-
-def getPortalId()
-{
-    return state.portalId
-}
-
 def setDevices(devices)
 {
     state.devices = devices
@@ -365,31 +272,6 @@ def setDevices(devices)
 def getDevices()
 {
     return state.devices
-}
-
-def setPortalKey(key)
-{
-    state.portalKey = key
-}
-
-def getPortalKey()
-{
-    return state.portalKey
-}
-
-def getUsername()
-{
-    return username
-}
-
-def getBaseURI()
-{
-    return "https://genie.exosite.com/api/portals/v1/"
-}
-
-def getBasePostURI()
-{
-    return "https://genie.m2.exosite.com/onep:v1/rpc/process"
 }
 
 def manageDoorDevice(name)
@@ -448,330 +330,6 @@ def genParamsApi(endpoint, type, body = null)
     }
  
     return params
-}
-
-def genParamsPre()
-{
-    def params =
-        [
-            uri: getBaseURI() + "users/_this/token",
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Basic " + ("${username}:${password}").bytes.encodeBase64().toString()
-            ]
-        ]
- 
-    return params
-}
-
-def genParamsToken(suffix)
-{
-    def params =
-        [
-            uri: getBaseURI() + suffix,
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Token: " + getToken()
-            ]
-        ]
- 
-    return params
-}
-
-def genParamsPost()
-{
-    def params =
-        [
-            uri: getBasePostURI(),
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Token: " + getToken(),
-            ],
-            contentType: 'application/json',
-            requestContentType: 'application/json'
-        ]
- 
-    return params
-}
-
-def genDoorInfoReq()
-{
-    genDoorInfoReq(0)
-}
-
-def genDoorInfoReq(doorNum)
-{
-    // NOTE: do not change the order of these requests
-    //   add more at the end if needed
-    def req = """
-    {
-    "auth": {
-        "cik": "${getPortalKey()}",
-        "client_id": "${getDevices()[doorNum]}"
-    },
-    "calls": [
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.door_status"
-                },
-                {}
-            ],
-            "id": 1,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.name"
-                },
-                {}
-            ],
-            "id": 2,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.link_status"
-                },
-                {}
-            ],
-            "id": 3,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.door_status"
-                },
-                {}
-            ],
-            "id": 4,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.name"
-                },
-                {}
-            ],
-            "id": 5,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.link_status"
-                },
-                {}
-            ],
-            "id": 6,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.door_status"
-                },
-                {}
-            ],
-            "id": 7,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.name"
-                },
-                {}
-            ],
-            "id": 8,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.link_status"
-                },
-                {}
-            ],
-            "id": 9,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dcm.wifi_rssi"
-                },
-                {}
-            ],
-            "id": 10,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.battery_level"
-                },
-                {}
-            ],
-            "id": 11,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.ble_strength"
-                },
-                {}
-            ],
-            "id": 12,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.temperature"
-                },
-                {}
-            ],
-            "id": 13,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.battery_level"
-                },
-                {}
-            ],
-            "id": 14,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.ble_strength"
-                },
-                {}
-            ],
-            "id": 15,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.temperature"
-                },
-                {}
-            ],
-            "id": 16,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.battery_level"
-                },
-                {}
-            ],
-            "id": 17,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.ble_strength"
-                },
-                {}
-            ],
-            "id": 18,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.temperature"
-                },
-                {}
-            ],
-            "id": 19,
-            "procedure": "read"
-        }
-    ]
-    }
-    """
-    
-    return req    
-}
-
-def httpGetExec(params, throwToCaller = false)
-{
-    logDebug("httpGetExec(${params})")
-    
-    try
-    {
-        def result
-        httpGet(params)
-        { resp ->
-            if (resp.data)
-            {
-                logDebug("resp.data = ${resp.data}")
-                result = resp.data
-            }
-        }
-        return result
-    }
-    catch (Exception e)
-    {
-        logDebug("httpGetExec() failed: ${e.message}")
-        if(throwToCaller)
-        {
-            throw(e)
-        }
-    }
-
-}
-
-def httpPostExec(params, throwToCaller = false)
-{
-    logDebug("httpPostExec(${params})")
-    
-    try
-    {
-        def result
-        httpPost(params)
-        { resp ->
-            if (resp.data)
-            {
-                logDebug("resp.data = ${resp.data}")
-                result = resp.data
-            }
-        }
-        return result
-    }
-    catch (Exception e)
-    {
-        logDebug("httpPostExec() failed: ${e.message}")
-        if(throwToCaller)
-        {
-            throw(e)
-        }
-    }
 }
 
 def httpAccess(op, params)
