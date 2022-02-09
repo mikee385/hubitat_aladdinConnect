@@ -65,11 +65,19 @@ def refreshFromMaster(door)
 def close()
 {
     parent?.componentClose(this.device)
+    
+    // estimate is <10s response time, 10s operation time
+    unschedule()
+    runIn(20, requestRefresh)
 }
 
 def open()
 {
     parent?.componentOpen(this.device)
+    
+    // estimate is <10s response time, 10s operation time
+    unschedule()
+    runIn(20, requestRefresh)
 }
 
 def requestRefresh()
