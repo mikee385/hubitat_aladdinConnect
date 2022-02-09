@@ -16,11 +16,7 @@ limitations under the License.
 
 Change history:
 
-1.2.0(dev) - tomw - Update to new API flow 
-1.1.2 - tomw - Support both seconds and minutes for refreshInterval.
-1.1.1 - tomw - Added Actuator for compatibility.
-1.1.0 - tomw - Added support for multiple openers.
-1.0.0 - tomw - Initial release.
+2.0.0(dev) - tomw - Update to new API flow
 
  */
 
@@ -32,13 +28,8 @@ metadata
         capability "Configuration"
         capability "Initialize"
         capability "Refresh"
-        capability "SignalStrength"
         
-        attribute "commStatus", "string"
-        
-        command "TEMP_closeDoor", ["device_id", "door_number"]
-        command "TEMP_openDoor", ["device_id", "door_number"]
-        
+        attribute "commStatus", "string"    
     }
 }
 
@@ -62,23 +53,39 @@ def logDebug(msg)
     }
 }
 
-def TEMP_closeDoor(deviceID, doorNum)
+def updated()
 {
-    logDebug("CLOSING")
-    operateDoor("close", deviceID, doorNum)
+    configure()
 }
 
-def TEMP_openDoor(deviceID, doorNum)
+def configure()
 {
-    logDebug("OPENING")
-    operateDoor("open", deviceID, doorNum)
+    state.clear()    
+    initialize()
 }
 
-def operateDoor(op, deviceID, doorNum)
+def initialize()
 {
-    payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
+    sendEvent(name: "commStatus", value: "unknown") 
+    refresh()
+}
 
-    httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
+def refresh()
+{
+    unschedule()
+    
+    try
+    {
+        refreshDoorInfo()
+        // TODO: signal strength
+    }
+    catch (Exception e)
+    {
+        logDebug("refresh() failed")
+    }
+    
+    // schedule next refresh
+    runIn(refreshPeriod(), refresh)
 }
 
 def login()
@@ -112,14 +119,15 @@ def get_devices()
 
     if(resp)
     {
-        def devices = []
+        def doors = []
+        def ch
+        
         for(device in resp.data.devices)
         {
-            logDebug device
-            def doors = []
+            logDebug device            
             for(door in device.doors)
             {
-                doors +=
+                thisDoor = 
                     [
                         device_id: device.id,
                         door_number: door.door_index,
@@ -127,52 +135,14 @@ def get_devices()
                         status: door.status,
                         link_status: door.link_status
                     ]
+                
+                doors += thisDoor                    
+                manageDoorDevice(thisDoor)?.refreshFromMaster(thisDoor)
             }
-            devices +=
-                [
-                    device_id: device.id,
-                    doors: doors
-                ]
         }
         
-        setDevices(devices)
+        setDevices(doors)
     }    
-}
-
-def update_doors()
-{
-    def devices = getDevices()
-    
-    def child
-    
-    if(devices)
-    {
-        devices.each
-        {
-            it.doors.each
-            {
-                child = manageDoorDevice("${it.device_id}:${it.door_number}")
-                if(child)
-                {
-                    logDebug("logging child ${it.device_id}:${it.door_number}")
-                }
-            }            
-        }
-    }
-}
-
-def updated()
-{
-    //configure()
-}
-
-def configure()
-{
-    state.clear()
-    sendEvent(name: "commStatus", value: "unknown") 
-    sendEvent(name: "rssi", value: "unknown")
-    
-    initialize()
 }
 
 def refreshDoorInfo()
@@ -180,26 +150,47 @@ def refreshDoorInfo()
     try
     {
         get_devices()
-        update_doors()
-        
         return
     }
     catch (Exception e)
     {
+        if(e.getResponse()?.getStatus()?.toInteger() == 401)
+        {
+            login()
+            get_devices()
+        }
+        
         logDebug("refreshDoorInfo() failed")
         sendEvent(name: "commStatus", value: "error")
         throw(e)
     }
 }
 
-def initialize()
+def operateDoor(deviceID, doorNum, op)
 {
-    sendEvent(name: "commStatus", value: "unknown") 
-    refresh()
+    payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]  
+    
+    httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
 }
 
-def uninstalled()
+def operateDoor(ch, op)
 {
+    if(ch)
+    {
+        details = ch.getDeviceNetworkId().split('-')
+        operateDoor(details?.getAt(0), details?.getAt(1), op)
+    }
+}
+
+void componentClose(ch)
+{
+    logDebug "Test"
+    operateDoor(ch, "close")
+}
+
+void componentOpen(ch)
+{
+    operateDoor(ch, "open")
 }
 
 def refreshPeriod()
@@ -209,26 +200,6 @@ def refreshPeriod()
     return refreshIntervalS ? basePeriod : basePeriod * 60
 }
 
-def refresh()
-{
-    unschedule()
-    
-    try
-    {
-        // TODO: do try refresh-login-refresh
-        login()    
-        refreshDoorInfo()
-        
-    }
-    catch (Exception e)
-    {
-        logDebug("refresh() failed")
-    }
-    
-    // schedule next refresh
-    runIn(refreshPeriod(), refresh)
-}
-
 def refreshFromChild()
 {
     unschedule()
@@ -236,22 +207,6 @@ def refreshFromChild()
     
     // schedule next refresh
     runIn(refreshPeriod(), refresh)
-}
-
-def checkCommStatus()
-{
-    switch(device.currentValue("commStatus"))
-    {
-        case "good":
-            logDebug("checkCommStatus() success")
-            return true
-        
-        case "error":
-        case "unknown":
-        default:
-            logDebug("checkCommStatus() failed")
-            return false
-    }
 }
 
 def setToken(token)
@@ -274,16 +229,17 @@ def getDevices()
     return state.devices
 }
 
-def manageDoorDevice(name)
+def manageDoorDevice(door)
 {
     // use existing child, or create it
-    return getChildDevice(childDoorName(name)) ?: 
-        addChildDevice("Aladdin Connect Garage Door", childDoorName(name), [label:"${childDoorName(name)}", isComponent:true, name:"${childDoorName(name)}"])
+    def child = 
+        getChildDevice(childDoorName(door)) ?: 
+        addChildDevice("Aladdin Connect Garage Door", childDoorName(door), [label:door.name, isComponent:true, name:"${childDoorName(door)}"])
 }
 
-def childDoorName(name)
+def childDoorName(door)
 {
-    return "${device.getName()}-${name}"
+    return "${door.device_id}-${door.door_number}"
 }
 
 String toQueryString(Map m)
@@ -342,23 +298,16 @@ def httpAccess(op, params)
     { resp ->
         result = resp
         logDebug("result.data = ${result.data}")
-    }    
-	
-    try
+    }  
+    
+    switch(op)
     {
-        switch(op)
-        {
-            case "POST":
-                httpPost(params, httpClosure)
-                break
-            case "GET":
-                httpGet(params, httpClosure)
-                break
-        }
-    }
-    catch(Exception e)
-    {
-        log.error "httpAccess(${op}, ${params}) error: ${e.message}"
+        case "POST":
+            httpPost(params, httpClosure)
+            break
+        case "GET":
+            httpGet(params, httpClosure)
+            break
     }
     
     return result
