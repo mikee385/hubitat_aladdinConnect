@@ -115,8 +115,6 @@ def get_devices()
 {
     def resp = httpAccess("GET", genParamsApi("configuration", "text"))
     
-    //resp = [data: [devices:[[is_locked:false, family:2, id:77751, legacy_id:F0AD4E0F20B3, ssid:RoamAtHome, doors:[[desired_door_status_outcome:success, updated_at:"", desired_door_status:Open, id:87651, user_id:29314, vehicle_color:OTHER, door_index:1, icon:1, link_status:3, door_updated_at:"2022-02-07T02:07:27Z", created_at:"2020-09-16T08:06:49Z", desired_status:99, status:4, fault:0, ble_strength:0, is_enabled:true, battery_level:0, device_id:77751, name:"Garage door", vehicle_type:OTHER]]]]]]    
-
     if(resp)
     {
         def doors = []
@@ -133,7 +131,9 @@ def get_devices()
                         door_number: door.door_index,
                         name: door.name,
                         status: door.status,
-                        link_status: door.link_status
+                        link_status: door.link_status,
+                        ble_strength: door.ble_strength,
+                        battery_level: door.battery_level
                     ]
                 
                 doors += thisDoor                    
