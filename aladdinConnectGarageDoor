@@ -25,7 +25,9 @@ metadata
     definition(name: "Aladdin Connect Garage Door", namespace: "tomw", author: "tomw", importUrl: "")
     {
         capability "Actuator"
+        capability "Battery"
         capability "GarageDoorControl"
+        capability "SignalStrength"
     }
 }
 
@@ -59,7 +61,8 @@ def refreshFromMaster(door)
         
     sendEvent(name: "door", value: stateVal)
     
-    // TODO: battery, signal strength
+    sendEvent(name: "battery", value: door.battery_level)
+    sendEvent(name: "rssi", value: door.ble_strength)
 }
 
 def close()
