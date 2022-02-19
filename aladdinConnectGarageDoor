@@ -73,13 +73,7 @@ def handleEvent(event)
 
 def updateDoor(door)
 {
-    def stateVal = doorStates[door.status]
-    
-    if(door.status in [2, 5])
-    {
-        unschedule()
-        runIn(10, requestRefresh)
-    }
+    def stateVal = doorStates[door.status]    
     
     sendEvent(name: "door", value: stateVal)
 }    
@@ -87,19 +81,11 @@ def updateDoor(door)
 def close()
 {
     parent?.componentClose(this.device)
-    
-    // estimate is <10s response time, 10s operation time
-    unschedule()
-    runIn(20, requestRefresh)
 }
 
 def open()
 {
     parent?.componentOpen(this.device)
-    
-    // estimate is <10s response time, 10s operation time
-    unschedule()
-    runIn(20, requestRefresh)
 }
 
 def requestRefresh()
