@@ -46,11 +46,33 @@ import groovy.transform.Field
 
 def refreshFromMaster(door)
 {
+    // this 'door' came from a polled refresh
+    
     if(!door)
     {
         return
     }
     
+    updateDoor(door)
+    
+    // save off the device_id for open/close operations
+    updateDataValue("device_id", door.device_id.toString())
+    
+    sendEvent(name: "battery", value: door.battery_level)
+    sendEvent(name: "rssi", value: door.ble_strength)
+}
+
+def handleEvent(event)
+{
+    // this 'event' came from a wss event response
+    
+    def door = [status: event.door_status]
+    
+    updateDoor(door)
+}
+
+def updateDoor(door)
+{
     def stateVal = doorStates[door.status]
     
     if(door.status in [2, 5])
@@ -58,12 +80,9 @@ def refreshFromMaster(door)
         unschedule()
         runIn(10, requestRefresh)
     }
-        
-    sendEvent(name: "door", value: stateVal)
     
-    sendEvent(name: "battery", value: door.battery_level)
-    sendEvent(name: "rssi", value: door.ble_strength)
-}
+    sendEvent(name: "door", value: stateVal)
+}    
 
 def close()
 {
