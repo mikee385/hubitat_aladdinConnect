@@ -29,7 +29,9 @@ metadata
         capability "Initialize"
         capability "Refresh"
         
-        attribute "commStatus", "string"    
+        attribute "commStatus", "string"
+        
+        command "connectWSS"
     }
 }
 
@@ -51,6 +53,41 @@ def logDebug(msg)
     {
         log.debug(msg)
     }
+}
+
+def connectWSS()
+{
+    def url = "wss://event-caster.st1.gdocntl.net/updates"
+    def headers =
+        [
+            Authorization: "Bearer ${getToken()}"
+        ]
+    
+    interfaces.webSocket.connect(url, headers: headers, ignoreSSLIssues: true)
+}
+
+def webSocketStatus(String message)
+{
+    logDebug("webSocketStatus: ${message}")
+}
+
+def parse(String message)
+{
+    logDebug("parse: ${message}")
+    
+    // message = '{"serial":"F0AD4E0F20B3","door":1,"door_status":1}'
+    
+    try
+    {
+        def event = new groovy.json.JsonSlurper().parseText(message)
+        def door = [legacy_id: event.serial, door_number: event.door]
+        
+        manageDoorDevice(door)?.handleEvent(event)
+    }
+    catch(Exception e)
+    {
+        log.debug "Unrecognized message: ${message}"
+    }    
 }
 
 def updated()
@@ -118,7 +155,6 @@ def get_devices()
     if(resp)
     {
         def doors = []
-        def ch
         
         for(device in resp.data.devices)
         {
@@ -127,6 +163,7 @@ def get_devices()
             {
                 thisDoor = 
                     [
+                        legacy_id: device.legacy_id?.toString(),
                         device_id: device.id,
                         door_number: door.door_index,
                         name: door.name,
@@ -168,7 +205,7 @@ def refreshDoorInfo()
 
 def operateDoor(deviceID, doorNum, op)
 {
-    payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]  
+    payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
     
     httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
 }
@@ -177,14 +214,14 @@ def operateDoor(ch, op)
 {
     if(ch)
     {
-        details = ch.getDeviceNetworkId().split('-')
-        operateDoor(details?.getAt(0), details?.getAt(1), op)
+        def details = ch.getDeviceNetworkId().split('-')
+        def deviceID = ch.getDataValue("device_id")
+        operateDoor(deviceID, details?.getAt(1), op)
     }
 }
 
 void componentClose(ch)
 {
-    logDebug "Test"
     operateDoor(ch, "close")
 }
 
@@ -234,12 +271,12 @@ def manageDoorDevice(door)
     // use existing child, or create it
     def child = 
         getChildDevice(childDoorName(door)) ?: 
-        addChildDevice("Aladdin Connect Garage Door", childDoorName(door), [label:door.name, isComponent:true, name:"${childDoorName(door)}"])
+        addChildDevice("Aladdin Connect Garage Door", childDoorName(door), [label:door.name, isComponent:false, name:"${childDoorName(door)}"])
 }
 
 def childDoorName(door)
 {
-    return "${door.device_id}-${door.door_number}"
+    return "${door.legacy_id}-${door.door_number}"
 }
 
 String toQueryString(Map m)
