@@ -74,9 +74,11 @@ def initialize()
 
         refresh()
         
-        runIn(5, connectWSS)
+        // we at least auth'ed correctly, but won't know
+        //  event socket status until later
+        sendEvent(name: "commStatus", value: "no events")
         
-        sendEvent(name: "commStatus", value: "good")
+        runIn(5, connectWSS)   
     }
     catch (Exception e)
     {
@@ -134,9 +136,6 @@ def closeWSS()
     try
     {
         setWasExpectedClose(true)
-        // wait for state to catch up
-        pauseExecution(500)
-        
         interfaces.webSocket.close()
     }
     catch (Exception e)
@@ -162,6 +161,10 @@ def webSocketStatus(String message)
     else if(message.startsWith("status: closing"))
     {
         sendEvent(name: "commStatus", value: "no events")
+        
+        // wait for state to catch up
+        pauseExecution(1000)
+        
         if(getWasExpectedClose())
         {
             setWasExpectedClose(false)
@@ -193,8 +196,7 @@ def getWasExpectedClose()
 
 def parse(String message)
 {
-    logDebug("parse: ${message}")
-    
+    logDebug("parse: ${message}")        
     try
     {
         def event = new groovy.json.JsonSlurper().parseText(message)
@@ -233,8 +235,8 @@ def login()
 
 def get_devices()
 {
-    def resp = httpAccess("GET", genParamsApi("configuration", "text"))    
-
+    def resp = httpAccess("GET", genParamsApi("configuration", "text"))
+    
     if(resp)
     {
         def doors = []
@@ -278,6 +280,8 @@ def refreshDoorInfo()
         {
             login()
             get_devices()
+            
+            return
         }
         
         logDebug("refreshDoorInfo() failed")
