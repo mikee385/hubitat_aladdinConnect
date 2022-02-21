@@ -196,11 +196,19 @@ def getWasExpectedClose()
 
 def parse(String message)
 {
-    logDebug("parse: ${message}")        
+    logDebug("parse: ${message}")
+        
     try
     {
         def event = new groovy.json.JsonSlurper().parseText(message)
-        def door = [legacy_id: event.serial, door_number: event.door]
+        
+        if(!event?.door_status)
+        {
+            // this is a non-door event, which we don't currently support
+            return
+        }
+        
+        def door = [legacy_id: event?.serial, door_number: event?.door, fault: event?.fault]
         
         manageDoorDevice(door)?.handleEvent(event)
     }
