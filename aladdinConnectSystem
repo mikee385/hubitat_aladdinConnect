@@ -197,7 +197,7 @@ def getWasExpectedClose()
 def parse(String message)
 {
     logDebug("parse: ${message}")
-        
+    
     try
     {
         def event = new groovy.json.JsonSlurper().parseText(message)
@@ -263,7 +263,8 @@ def get_devices()
                         status: door.status,
                         link_status: door.link_status,
                         ble_strength: door.ble_strength,
-                        battery_level: door.battery_level
+                        battery_level: door.battery_level,
+                        fault: door.fault
                     ]
                 
                 doors += thisDoor                    
