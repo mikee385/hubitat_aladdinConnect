@@ -37,10 +37,10 @@ import groovy.transform.Field
         0: "unknown",
         1: "open",
         2: "opening",
-        3: "unknown",
+        3: "opening timeout",
         4: "closed",
         5: "closing",
-        6: "unknown",
+        6: "closing timeout",
         7: "unknown"
     ]
 
@@ -56,7 +56,7 @@ def refreshFromMaster(door)
     updateDoor(door)
     
     // save off the device_id for open/close operations
-    updateDataValue("device_id", door.device_id.toString())
+    updateDataValue("device_id", door.device_id?.toString())
     
     sendEvent(name: "battery", value: door.battery_level)
     sendEvent(name: "rssi", value: door.ble_strength)
@@ -66,14 +66,26 @@ def handleEvent(event)
 {
     // this 'event' came from a wss event response
     
-    def door = [status: event.door_status]
+    if(!event)
+    {
+        return
+    }
+    
+    def door = [status: event.door_status, fault: event.fault]
     
     updateDoor(door)
 }
 
 def updateDoor(door)
 {
-    def stateVal = doorStates[door.status]    
+    def stateVal = doorStates[door.status]
+    
+    if(door.fault)
+    {
+        // this is a special value related to a physical fault,
+        //  so we override the value here to match the Genie app 
+        stateVal = "UL Lockout"
+    }
     
     sendEvent(name: "door", value: stateVal)
 }    
