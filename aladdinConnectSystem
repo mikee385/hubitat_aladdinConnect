@@ -69,9 +69,8 @@ def initialize()
     sendEvent(name: "commStatus", value: "unknown")
     try
     {
-        unschedule()
         closeWSS()
-
+        
         refresh()
         
         // we at least auth'ed correctly, but won't know
@@ -83,9 +82,8 @@ def initialize()
     catch (Exception e)
     {
         logDebug("initialize() failed: ${e.message}")
-        sendEvent(name: "commStatus", value: "error")
-        
-        unschedule()
+        sendEvent(name: "commStatus", value: "error")        
+
         reinitialize()
     }
 }
@@ -94,14 +92,7 @@ def refresh()
 {
     unschedule(refresh)
     
-    try
-    {
-        refreshDoorInfo()
-    }
-    catch (Exception e)
-    {
-        logDebug("refresh() failed")
-    }
+    refreshDoorInfo()
     
     // schedule next refresh
     runIn(refreshPeriod(), refresh)
@@ -289,17 +280,8 @@ def refreshDoorInfo()
     }
     catch (Exception e)
     {
-        if(e.getResponse()?.getStatus()?.toInteger() == 401)
-        {
-            login()
-            get_devices()
-            
-            return
-        }
-        
-        logDebug("refreshDoorInfo() failed")
+        logDebug("refreshDoorInfo() failed: ${e}")
         sendEvent(name: "commStatus", value: "error")
-        throw(e)
     }
 }
 
@@ -310,7 +292,7 @@ def operateDoor(deviceID, doorNum, op)
         def payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
         httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
     }
-    catch (Exception e)
+    catch (groovyx.net.http.HttpResponseException e)
     {
         switch(e.getResponse()?.getStatus()?.toInteger())
         {
@@ -321,6 +303,11 @@ def operateDoor(deviceID, doorNum, op)
             default:
                 logDebug("operateDoor unknown error: ${e}")
         }
+    }
+    catch (Exception e)
+    {
+        logDebug("operateDoor unknown error: ${e}")
+        sendEvent(name: "commStatus", value: "error")
     }
 }
 
@@ -440,16 +427,34 @@ def httpAccess(op, params)
     { resp ->
         result = resp
         logDebug("result.data = ${result.data}")
-    }  
+    }
+    
+    def httpOp
     
     switch(op)
     {
         case "POST":
-            httpPost(params, httpClosure)
+            httpOp = this.delegate.&httpPost
             break
         case "GET":
-            httpGet(params, httpClosure)
+            httpOp = this.delegate.&httpGet
             break
+    }
+    
+    try
+    {
+        httpOp(params, httpClosure)
+    }
+    catch (groovyx.net.http.HttpResponseException e)
+    {
+        if(e.getResponse()?.getStatus()?.toInteger() == 401)
+        {
+            // attempt to re-auth if necessary
+            login()
+            params['headers']['Authorization'] = "Bearer ${getToken()}"
+            
+            httpOp(params, httpClosure)
+        }
     }
     
     return result
