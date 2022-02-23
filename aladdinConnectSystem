@@ -197,7 +197,7 @@ def getWasExpectedClose()
 def parse(String message)
 {
     logDebug("parse: ${message}")
-    
+        
     try
     {
         def event = new groovy.json.JsonSlurper().parseText(message)
@@ -301,9 +301,23 @@ def refreshDoorInfo()
 
 def operateDoor(deviceID, doorNum, op)
 {
-    payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
-    
-    httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
+    try
+    {
+        def payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
+        httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
+    }
+    catch (Exception e)
+    {
+        switch(e.getResponse()?.getStatus()?.toInteger())
+        {
+            case 400:
+                logDebug("operateDoor: command ignored due to lock status or opened/closed state")
+                return
+            
+            default:
+                logDebug("operateDoor unknown error: ${e}")
+        }
+    }
 }
 
 def operateDoor(ch, op)
