@@ -92,7 +92,7 @@ def initialize()
 
 def refresh()
 {
-    unschedule()
+    unschedule(refresh)
     
     try
     {
@@ -197,7 +197,7 @@ def getWasExpectedClose()
 def parse(String message)
 {
     logDebug("parse: ${message}")
-        
+    
     try
     {
         def event = new groovy.json.JsonSlurper().parseText(message)
@@ -238,6 +238,10 @@ def login()
     if(resp)
     {
         setToken(resp.data.access_token)
+        
+        // schedule next login 10 minutes before expiration
+        def exp = resp.data.expires_in?.toInteger()
+        runIn(exp - (60 * 10), login)
     }
 }
 
@@ -349,11 +353,7 @@ def refreshPeriod()
 
 def refreshFromChild()
 {
-    unschedule()
     refreshDoorInfo()
-    
-    // schedule next refresh
-    runIn(refreshPeriod(), refresh)
 }
 
 def setToken(token)
