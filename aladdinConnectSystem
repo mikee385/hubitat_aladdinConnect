@@ -209,7 +209,7 @@ def parse(String message)
     }    
 }
 
-def login()
+def login(throwToCaller = false)
 {
     def body = 
     [
@@ -234,13 +234,16 @@ def login()
                 
                 // schedule next login 10 minutes before expiration
                 def exp = resp.data.expires_in?.toInteger()
-                runIn(exp - (60 * 10), login)
+                runIn(exp - (60 * 10), reinitialize)
             }
         }
     }
     catch (Exception e)
     {
         logDebug("login failed: ${e}")
+        
+        if(throwToCaller)
+        { throw(e) }
     }
 }
 
