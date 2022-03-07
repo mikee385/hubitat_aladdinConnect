@@ -230,6 +230,8 @@ def login(throwToCaller = false)
         { resp ->
             if(resp)
             {
+                logDebug("token refreshed")
+                
                 setToken(resp.data.access_token)
                 
                 // schedule next login 10 minutes before expiration
