@@ -69,14 +69,13 @@ def initialize()
     sendEvent(name: "commStatus", value: "unknown")
     try
     {
-        closeWSS()
-        
         refresh()
         
         // we at least auth'ed correctly, but won't know
         //  event socket status until later
         sendEvent(name: "commStatus", value: "no events")
         
+        closeWSS()
         runIn(5, connectWSS)   
     }
     catch (Exception e)
