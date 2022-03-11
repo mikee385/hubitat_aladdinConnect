@@ -99,6 +99,8 @@ def refresh()
 
 def reinitialize()
 {
+    unschedule(initialize)
+    
     // thanks @ogiewon for the example
     
     // first delay is 2 seconds, doubles every time
