@@ -69,6 +69,10 @@ def initialize()
     sendEvent(name: "commStatus", value: "unknown")
     try
     {
+        // clear token so that login() 
+        //   is guaranteed to happen in refresh()
+        setToken(null)
+        
         refresh()
         
         // we at least auth'ed correctly, but won't know
