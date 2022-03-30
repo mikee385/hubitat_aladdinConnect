@@ -224,30 +224,37 @@ def login(throwToCaller = false)
         username: java.net.URLEncoder.encode(username, "UTF-8"),
         password: password.getBytes("UTF-8").encodeBase64().toString(),        
         platform: "platform",
-        app_version: "5.25",
-        build_number: "2038",
+        app_version: "5.30",
+        build_number: "2042",
         os_version: "12.0.0"
     ]
     
     try
     {
+        
         httpPost(genParamsApi("oauth/token", "text", body))  
         { resp ->
-            if(resp)
+            if(resp.data)
             {
-                logDebug("token refreshed")
+                logDebug("token refreshed = ${resp.data}")
                 
                 setToken(resp.data.access_token)
                 
-                // schedule next login 10 minutes before expiration
-                def exp = resp.data.expires_in?.toInteger()
-                runIn(exp - (60 * 10), reinitialize)
+                // schedule next login at 50% expiration plus 10 seconds
+                def exp = ( ((resp.data.expires_in?.toInteger() * 0.5) + 10)?.intValue())
+                
+                unschedule(reinitialize)
+                runIn(exp, reinitialize)
             }
         }
     }
     catch (Exception e)
     {
         logDebug("login failed: ${e}")
+
+        // try again in 10 minutes
+        unschedule(reinitialize)
+        runIn(600, reinitialize)
         
         if(throwToCaller)
         { throw(e) }
@@ -412,10 +419,10 @@ def genParamsApi(endpoint, type, body = null)
             uri: "https://pxdqkls7aj.execute-api.us-east-1.amazonaws.com/Android" + "/" + endpoint,
             headers:
             [
-                AppVersion: '5.25',
+                AppVersion: '5.30',
                 BundleName: 'com.geniecompany.AladdinConnect',
                 'User-Agent': 'okhttp/3.12.1',
-                'BuildVersion': '131',
+                'BuildVersion': '2042',
                 'X-Api-Key': 'fkowarQ0dX9Gj1cbB9Xkx1yXZkd6bzVn5x24sECW',
                 'Content-Type': (type == "text") ? 'application/x-www-form-urlencoded' : 'application/json',
                 Authorization: "Bearer ${getToken()}"
