@@ -2,7 +2,7 @@
 
 This package provides driver capabilities for Hubitat with Genie Aladdin Connect systems: GarageDoorControl; SignalStrength (as rssi for the BLE door sensor); and Battery (as % for the BLE door sensor) .
 
-Note that all operations have a cloud (Internet) interaction. This implementation is based on reverse engineering of the new API, which began rolling out in late 2021 and broke compatibility with 1.x versions of this driver.  This implementation was used as a reference for basic API operations: https://github.com/shoejosh/aladdin-connect
+Note that all operations have a cloud (Internet) interaction. This implementation is using the new Aladdin Connect API, which began rolling out in late 2021 and broke compatibility with 1.x versions of this driver.  This was used as a reference for basic API operations: https://github.com/shoejosh/aladdin-connect
 
 This new implementation also utilizes a websocket interface for faster status updates without polling, with great thanks to @mike-s123 for doing the research and documenting that interface.  Polled refreshes are now only necessary for SignalStrength and Battery level.
 
