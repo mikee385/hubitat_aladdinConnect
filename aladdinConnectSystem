@@ -16,7 +16,11 @@ limitations under the License.
 
 Change history:
 
-2.0.0(dev) - tomw - Update to new API flow
+2.0.0 - tomw and mikes - Update to new API flow and real-time events without polling
+1.1.2 - tomw - Support both seconds and minutes for refreshInterval.
+1.1.1 - tomw - Added Actuator for compatibility.
+1.1.0 - tomw - Added support for multiple openers.
+1.0.0 - tomw - Initial release.
 
  */
 
