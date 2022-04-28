@@ -16,6 +16,7 @@ limitations under the License.
 
 Change history:
 
+2.0.0 - tomw and mikes - Update to new API flow and real-time events without polling
 1.1.1 - tomw - Added Actuator for compatibility.
 1.1.0 - tomw - Added support for multiple openers.
 1.0.0 - tomw - Initial release.
@@ -29,246 +30,80 @@ metadata
         capability "Actuator"
         capability "Battery"
         capability "GarageDoorControl"
-        capability "Initialize"
         capability "SignalStrength"
-        
-        attribute "commStatus", "string"
     }
 }
 
-preferences
-{
-    section
-    {
-        input name: "doorNumber", type: "text", title: "Door number (1-3)", required: true
-        input name: "openerNumber", type: "text", title: "Opener number", required: true
-        input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
-    }
-}
+import groovy.transform.Field
+@Field Map doorStates = 
+    [
+        0: "unknown",
+        1: "open",
+        2: "opening",
+        3: "opening timeout",
+        4: "closed",
+        5: "closing",
+        6: "closing timeout",
+        7: "unknown"
+    ]
 
-def logDebug(msg) 
+def refreshFromMaster(door)
 {
-    if (logEnable)
-    {
-        log.debug(msg)
-    }
-}
-
-def installed()
-{
-    initialize()
-}
-
-def updated()
-{
-    installed()
-    requestRefresh()
-}
-
-def initialize()
-{
-    sendEvent(name: "commStatus", value: "unknown")
-    sendEvent(name: "door", value: "unknown")    
-    sendEvent(name: "battery", value: "unknown")
-    sendEvent(name: "rssi", value: "unknown")
-}
-
-def refreshFromMaster(doorNum, doorState)
-{
-    def doorVals = doorNum.toString().padLeft(2, "0").split("(?!^)")
+    // this 'door' came from a polled refresh
     
-    if(doorVals[1].toString() != doorNumber)
+    if(!door)
     {
-        device.updateSetting("doorNumber", doorVals[1].toString())
+        return
     }
     
-    if(doorVals[0].toString() != openerNumber)
+    updateDoor(door)
+    
+    // save off the device_id for open/close operations
+    updateDataValue("device_id", door.device_id?.toString())
+    
+    sendEvent(name: "battery", value: door.battery_level)
+    sendEvent(name: "rssi", value: door.ble_strength)
+}
+
+def handleEvent(event)
+{
+    // this 'event' came from a wss event response
+    
+    if(!event)
     {
-        device.updateSetting("openerNumber", doorVals[0].toString())
+        return
     }
     
-    def stateVal = ""
-    switch(doorState.doorStatus.toString())
+    def door = [status: event.door_status, fault: event.fault]
+    
+    updateDoor(door)
+}
+
+def updateDoor(door)
+{
+    def stateVal = doorStates[door.status]
+    
+    if(door.fault)
     {
-        case "0":
-        case "3":
-        case "6":
-        case "7":
-        default:
-            stateVal = "unknown"
-            break
-        case "1":
-            stateVal = "open"
-            break
-        case "2":
-            stateVal = "opening"
-            unschedule()
-            runIn(10, requestRefresh)
-            break
-        case "4":
-            stateVal = "closed"
-            break
-        case "5":
-            stateVal = "closing"
-            unschedule()
-            runIn(10, requestRefresh)
-            break
-    }    
+        // this is a special value related to a physical fault,
+        //  so we override the value here to match the Genie app 
+        stateVal = "UL Lockout"
+    }
+    
     sendEvent(name: "door", value: stateVal)
-    
-    sendEvent(name: "battery", value: doorState.doorBattery)
-    sendEvent(name: "rssi", value: doorState.doorBLE)
-    
-    sendEvent(name: "commStatus", value: "good")
-}
+}    
 
 def close()
 {
-    try
-    {
-        def postParams = genParamsPost()
-        postParams['body'] = genDoorStateReq(0)
-        httpPostExec(postParams, true)
-        
-        sendEvent(name: "commStatus", value: "good")
-        
-        // estimate is <10s response time, 10s operation time
-        unschedule()
-        runIn(20, requestRefresh)
-    }
-    catch (Exception e)
-    {
-        logDebug("close() failed: ${e.message}")
-        sendEvent(name: "commStatus", value: "error")
-    }
+    parent?.componentClose(this.device)
 }
 
 def open()
 {
-    try
-    {
-        def postParams = genParamsPost()
-        postParams['body'] = genDoorStateReq(1)
-        httpPostExec(postParams, true)
-        
-        sendEvent(name: "commStatus", value: "good")
-        
-        // estimate is <10s response time, 10s operation time
-        unschedule()
-        runIn(20, requestRefresh)
-    }
-    catch (Exception e)
-    {
-        logDebug("open() failed: ${e.message}")
-        sendEvent(name: "commStatus", value: "error")
-    }
+    parent?.componentOpen(this.device)
 }
 
 def requestRefresh()
 {
-    parent.refreshFromChild()
-}
-
-def checkCommStatus()
-{
-    switch(device.currentValue("commStatus"))
-    {
-        case "good":
-            logDebug("checkCommStatus() success")
-            return true
-        
-        case "error":
-        case "unknown":
-        default:
-            logDebug("checkCommStatus() failed")
-            return false
-    }
-}
-
-def getBasePostURI()
-{
-    return "https://genie.m2.exosite.com/onep:v1/rpc/process"
-}
-
-def genParamsPost()
-{
-    def params =
-        [
-            uri: getBasePostURI(),
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Token: " + parent.getToken()
-            ],
-            contentType: 'application/json',
-            requestContentType: 'application/json'
-        ]
- 
-    return params
-}
-
-def genDoorStateReq(doorState)
-{
-    def req = """
-    {
-    "auth": {
-        "cik": "${parent.getPortalKey()}",
-        "client_id": "${parent.getDevices()[openerNumber.toInteger()]}"
-    },
-    "calls": [
-    	{
-            "arguments": [
-                {
-                    "alias": "dps${doorNumber}.desired_status"
-                },
-                "${doorState ? 1 : 0}"
-            ],
-            "id": 1,
-            "procedure": "write"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps${doorNumber}.desired_status_user"
-                },
-                "${parent.getUsername()}"
-            ],
-            "id": 2,
-            "procedure": "write"
-        }
-	]
-    }
-    """
-    
-    return req
-}
-
-def httpPostExec(params, throwToCaller = false)
-{
-    logDebug("httpPostExec(${params})")
-    
-    try
-    {
-        def result
-        httpPost(params)
-        { resp ->
-            if (resp.data)
-            {
-                logDebug("resp.data = ${resp.data}")
-                result = resp.data
-            }
-        }
-        return result
-    }
-    catch (Exception e)
-    {
-        logDebug("httpPostExec() failed: ${e.message}")
-        if(throwToCaller)
-        {
-            throw(e)
-        }
-    }
+    parent?.refreshFromChild()
 }

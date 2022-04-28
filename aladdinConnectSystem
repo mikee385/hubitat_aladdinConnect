@@ -16,6 +16,7 @@ limitations under the License.
 
 Change history:
 
+2.0.0 - tomw and mikes - Update to new API flow and real-time events without polling
 1.1.2 - tomw - Support both seconds and minutes for refreshInterval.
 1.1.1 - tomw - Added Actuator for compatibility.
 1.1.0 - tomw - Added support for multiple openers.
@@ -31,7 +32,6 @@ metadata
         capability "Configuration"
         capability "Initialize"
         capability "Refresh"
-        capability "SignalStrength"
         
         attribute "commStatus", "string"
     }
@@ -64,102 +64,306 @@ def updated()
 
 def configure()
 {
-    state.clear()
-    sendEvent(name: "commStatus", value: "unknown") 
-    sendEvent(name: "rssi", value: "unknown")
-    
+    state.clear()    
     initialize()
 }
 
-def refreshTokens()
+def initialize()
 {
+    sendEvent(name: "commStatus", value: "unknown")
     try
     {
-        // retrieve and store user token
-        setToken(httpGetExec(genParamsPre(), true))
+        // clear token so that login() 
+        //   is guaranteed to happen in refresh()
+        setToken(null)
         
-        // retrieve and store user ID
-        setUserId(httpGetExec(genParamsToken("users/_this"), true)?.id)
+        refresh()
         
-        // retrieve and store portal ID
-        setPortalId(httpGetExec(genParamsToken("users/${getUserId()}/portals"), true)[0].PortalID)
+        // we at least auth'ed correctly, but won't know
+        //  event socket status until later
+        sendEvent(name: "commStatus", value: "no events")
         
-        // retrieve and store devices and portal key
-        def portalDetails = httpGetExec(genParamsToken("portals/${getPortalId()}"), true)
-        setDevices(portalDetails.devices)
-        setPortalKey(portalDetails.info.key)
-        
-        sendEvent(name: "commStatus", value: "good")
+        closeWSS()
+        runIn(5, connectWSS)   
     }
     catch (Exception e)
     {
-        logDebug("refreshTokens() failed")
-        sendEvent(name: "commStatus", value: "error")
-        throw(e)
+        logDebug("initialize() failed: ${e.message}")
+        sendEvent(name: "commStatus", value: "error")        
+
+        reinitialize()
     }
 }
 
-def refreshDoorInfo()
+def refresh()
+{
+    unschedule(refresh)
+    
+    refreshDoorInfo(true)
+    
+    // schedule next refresh
+    runIn(refreshPeriod(), refresh)
+}
+
+def reinitialize()
+{
+    unschedule(initialize)
+    
+    // thanks @ogiewon for the example
+    
+    // first delay is 2 seconds, doubles every time
+    def delayCalc = (state.reconnectDelay ?: 1) * 2    
+    // upper limit is 600s
+    def reconnectDelay = delayCalc <= 600 ? delayCalc : 600
+    
+    state.reconnectDelay = reconnectDelay
+    runIn(reconnectDelay, initialize)
+}
+
+def connectWSS()
+{
+    def url = "wss://event-caster.st1.gdocntl.net/updates"
+    def headers =
+        [
+            Authorization: "Bearer ${getToken()}"
+        ]
+    
+    interfaces.webSocket.connect(url, headers: headers, ignoreSSLIssues: true)
+}
+
+def closeWSS()
 {
     try
     {
-        // query door info for all devices
-        def postParams = genParamsPost()
-        for(j = 0; j < getDevices().size(); j++)
+        setWasExpectedClose(true)
+        interfaces.webSocket.close()
+    }
+    catch (Exception e)
+    {
+        // swallow errors
+    }
+}
+
+def webSocketStatus(String message)
+{
+    logDebug("webSocketStatus: ${message}")
+    
+    // thanks for the idea: https://community.hubitat.com/t/websocket-client/11843/15
+    if(message.startsWith("status: open"))
+    {        
+        sendEvent(name: "commStatus", value: "good")
+        
+        state.reconnectDelay = 1
+        setWasExpectedClose(false)
+        
+        return
+    }
+    else if(message.startsWith("status: closing"))
+    {
+        sendEvent(name: "commStatus", value: "no events")
+        
+        // wait for state to catch up
+        pauseExecution(1000)
+        
+        if(getWasExpectedClose())
         {
-            postParams['body'] = genDoorInfoReq(j)
-            def doorInfo = httpPostExec(postParams, true)
-            
-            if(doorInfo)
+            setWasExpectedClose(false)
+            return
+        }
+        
+        reinitialize()
+        
+        return
+    }
+    else if(message.startsWith("failure:"))
+    {
+        sendEvent(name: "commStatus", value: "error")        
+        reinitialize()
+        
+        return
+    }
+}
+
+def setWasExpectedClose(wasExpected)
+{
+    state.wasExpectedClose = wasExpected
+}
+
+def getWasExpectedClose()
+{
+    return state.wasExpectedClose
+}
+
+def parse(String message)
+{
+    logDebug("parse: ${message}")
+    
+    try
+    {
+        def event = new groovy.json.JsonSlurper().parseText(message)
+        
+        if(!event?.door_status)
+        {
+            // this is a non-door event, which we don't currently support
+            return
+        }
+        
+        def door = [legacy_id: event?.serial, door_number: event?.door, fault: event?.fault]
+        
+        manageDoorDevice(door)?.handleEvent(event)
+    }
+    catch(Exception e)
+    {
+        log.debug "Unrecognized message: ${message}"
+    }    
+}
+
+def login(throwToCaller = false)
+{
+    def body = 
+    [
+        grant_type: "password",
+        client_id: "1000",
+        brand: "ALADDIN",
+        username: java.net.URLEncoder.encode(username, "UTF-8"),
+        password: password.getBytes("UTF-8").encodeBase64().toString(),        
+        platform: "platform",
+        app_version: "5.30",
+        build_number: "2042",
+        os_version: "12.0.0"
+    ]
+    
+    try
+    {
+        
+        httpPost(genParamsApi("oauth/token", "text", body))  
+        { resp ->
+            if(resp.data)
             {
-                sendEvent(name: "commStatus", value: "good")
+                logDebug("token refreshed = ${resp.data}")
                 
-                sendEvent(name: "rssi", value: (doorInfo[9].result.isEmpty() ? "unknown" : doorInfo[9].result[0][1].toInteger()))
+                setToken(resp.data.access_token)
                 
-                def child
-                def doorDevName
-                for(i = 1; i < 4; i++)
-                {
-                    if(!doorInfo[3*i-2].result.isEmpty())
-                    {
-                        doorDevName = (j == 0 ? "${i}" : "${j}${i}") 
-                        logDebug("managing door: ${doorDevName}")
-                        child = manageDoorDevice(doorDevName.toString())
-                        def doorState = [:]
-                        if(child)
-                        {
-                            doorState =
-                                [
-                                    doorStatus: (doorInfo[3*i-3].result.isEmpty() ? "unknown" : doorInfo[3*i-3].result[0][1]),
-                                    doorBattery: (doorInfo[3*(i-1)+10].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+10].result[0][1]),
-                                    doorBLE: (doorInfo[3*(i-1)+11].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+11].result[0][1]),
-                                    doorTemp: (doorInfo[3*(i-1)+12].result.isEmpty() ? "unknown" : doorInfo[3*(i-1)+12].result[0][1]),
-                                ]
-                            // update child device
-                            logDebug("updating door: ${doorDevName} on child: ${child} with state: ${doorState}")
-                            child.refreshFromMaster(doorDevName.toString(), doorState)
-                        }
-                    }
-                }
+                // schedule next login at 50% expiration plus 10 seconds
+                def exp = ( ((resp.data.expires_in?.toInteger() * 0.5) + 10)?.intValue())
+                
+                unschedule(reinitialize)
+                runIn(exp, reinitialize)
             }
         }
     }
     catch (Exception e)
     {
-        logDebug("refreshDoorInfo() failed")
-        sendEvent(name: "commStatus", value: "error")
-        throw(e)
+        logDebug("login failed: ${e}")
+
+        // try again in 10 minutes
+        unschedule(reinitialize)
+        runIn(600, reinitialize)
+        
+        if(throwToCaller)
+        { throw(e) }
     }
 }
 
-def initialize()
+def get_devices()
 {
-    sendEvent(name: "commStatus", value: "unknown") 
-    refresh()
+    def resp = httpAccess("GET", genParamsApi("configuration", "text"))
+    
+    if(resp)
+    {
+        def doors = []
+        
+        for(device in resp.data.devices)
+        {
+            logDebug device            
+            for(door in device.doors)
+            {
+                thisDoor = 
+                    [
+                        legacy_id: device.legacy_id?.toString(),
+                        device_id: device.id,
+                        door_number: door.door_index,
+                        name: door.name,
+                        status: door.status,
+                        link_status: door.link_status,
+                        ble_strength: door.ble_strength,
+                        battery_level: door.battery_level,
+                        fault: door.fault
+                    ]
+                
+                doors += thisDoor                    
+                manageDoorDevice(thisDoor)?.refreshFromMaster(thisDoor)
+            }
+        }
+        
+        setDevices(doors)
+    }    
 }
 
-def uninstalled()
+def refreshDoorInfo(throwToCaller = false)
 {
+    try
+    {
+        get_devices()
+        return
+    }
+    catch (Exception e)
+    {
+        logDebug("refreshDoorInfo() failed: ${e}")
+        sendEvent(name: "commStatus", value: "error")
+        
+        if(throwToCaller)
+        { throw(e) }
+    }
+}
+
+def operateDoor(deviceID, doorNum, op, throwToCaller = false)
+{
+    try
+    {
+        def payload = [command_key: (op == "open") ? "OpenDoor" : "CloseDoor"]
+        httpAccess("POST", genParamsApi("devices/${deviceID}/door/${doorNum}/command", "json", payload))
+    }
+    catch (groovyx.net.http.HttpResponseException e)
+    {
+        switch(e.getResponse()?.getStatus()?.toInteger())
+        {
+            case 400:
+                logDebug("operateDoor: command ignored due to lock status or opened/closed state")
+                return
+            
+            default:
+                logDebug("operateDoor unknown error: ${e}")
+        }
+    }
+    catch (Exception e)
+    {
+        logDebug("operateDoor unknown error: ${e}")
+        sendEvent(name: "commStatus", value: "error")
+        
+        if(throwToCaller)
+        { throw(e) }
+    }
+}
+
+def operateDoor(ch, op)
+{
+    if(ch)
+    {
+        def details = ch.getDeviceNetworkId().split('-')
+        def deviceID = ch.getDataValue("device_id")
+        operateDoor(deviceID, details?.getAt(1), op)
+    }
+}
+
+void componentClose(ch)
+{
+    operateDoor(ch, "close")
+}
+
+void componentOpen(ch)
+{
+    operateDoor(ch, "open")
 }
 
 def refreshPeriod()
@@ -169,47 +373,9 @@ def refreshPeriod()
     return refreshIntervalS ? basePeriod : basePeriod * 60
 }
 
-def refresh()
-{
-    unschedule()
-    
-    try
-    {
-        refreshTokens()
-        refreshDoorInfo()
-    }
-    catch (Exception e)
-    {
-        logDebug("refresh() failed")
-    }
-    
-    // schedule next refresh
-    runIn(refreshPeriod(), refresh)
-}
-
 def refreshFromChild()
 {
-    unschedule()
     refreshDoorInfo()
-    
-    // schedule next refresh
-    runIn(refreshPeriod(), refresh)
-}
-
-def checkCommStatus()
-{
-    switch(device.currentValue("commStatus"))
-    {
-        case "good":
-            logDebug("checkCommStatus() success")
-            return true
-        
-        case "error":
-        case "unknown":
-        default:
-            logDebug("checkCommStatus() failed")
-            return false
-    }
 }
 
 def setToken(token)
@@ -222,26 +388,6 @@ def getToken()
     return state.token
 }
 
-def setUserId(id)
-{
-    state.userId = id
-}
-
-def getUserId()
-{
-    return state.userId
-}
-
-def setPortalId(id)
-{
-    state.portalId = id
-}
-
-def getPortalId()
-{
-    return state.portalId
-}
-
 def setDevices(devices)
 {
     state.devices = devices
@@ -252,384 +398,99 @@ def getDevices()
     return state.devices
 }
 
-def setPortalKey(key)
+def manageDoorDevice(door)
 {
-    state.portalKey = key
+    // use existing child, or create it
+    def child = 
+        getChildDevice(childDoorName(door)) ?: 
+        addChildDevice("Aladdin Connect Garage Door", childDoorName(door), [label:door.name, isComponent:false, name:"${childDoorName(door)}"])
 }
 
-def getPortalKey()
+def childDoorName(door)
 {
-    return state.portalKey
+    return "${door.legacy_id}-${door.door_number}"
 }
 
-def getUsername()
+String toQueryString(Map m)
 {
-    return username
+    return m.collect{ k, v -> "${k}=${v.toString()}" }.sort().join("&")
 }
 
-def getBaseURI()
+def genParamsApi(endpoint, type, body = null)
 {
-    return "https://genie.exosite.com/api/portals/v1/"
-}
-
-def getBasePostURI()
-{
-    return "https://genie.m2.exosite.com/onep:v1/rpc/process"
-}
-
-def findDoorDevice(name)
-{
-    return getChildDevice(childDoorName(name))
-}
-
-def createDoorDevice(name)
-{
-    return addChildDevice("Aladdin Connect Garage Door", childDoorName(name), [label:"${childDoorName(name)}", isComponent:true, name:"${childDoorName(name)}"])
-}
-
-def manageDoorDevice(name)
-{
-    def child = findDoorDevice(name)
-    if(child)
-    {
-        // use existing child if it exists...
-        logDebug("found existing child: ${child}")
-    }
-    else
-    {
-        // create child if it didn't exist...
-        child = createDoorDevice(name)
-        logDebug("created new child: ${child}")
-    }
+    def params =
+        [
+            uri: "https://pxdqkls7aj.execute-api.us-east-1.amazonaws.com/Android" + "/" + endpoint,
+            headers:
+            [
+                AppVersion: '5.30',
+                BundleName: 'com.geniecompany.AladdinConnect',
+                'User-Agent': 'okhttp/3.12.1',
+                'BuildVersion': '2042',
+                'X-Api-Key': 'fkowarQ0dX9Gj1cbB9Xkx1yXZkd6bzVn5x24sECW',
+                'Content-Type': (type == "text") ? 'application/x-www-form-urlencoded' : 'application/json',
+                Authorization: "Bearer ${getToken()}"
+            ],
+            
+            requestContentType: (type == "text") ? 'application/x-www-form-urlencoded' : 'application/json',
+        ]
     
-    return child
-}
-
-def childDoorName(name)
-{
-    return "${device.getName()}-${name}"
-}
-
-def genParamsPre()
-{
-    def params =
-        [
-            uri: getBaseURI() + "users/_this/token",
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Basic " + ("${username}:${password}").bytes.encodeBase64().toString()
-            ]
-        ]
- 
-    return params
-}
-
-def genParamsToken(suffix)
-{
-    def params =
-        [
-            uri: getBaseURI() + suffix,
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Token: " + getToken()
-            ]
-        ]
- 
-    return params
-}
-
-def genParamsPost()
-{
-    def params =
-        [
-            uri: getBasePostURI(),
-            headers:
-            [
-                'AppVersion': '2.10.1',
-                'BundleName': 'com.geniecompany.AladdinConnect',
-                'User-Agent': 'Aladdin Connect Android v2.10.1',
-                'BuildVersion': '131',
-                'Authorization': "Token: " + getToken(),
-            ],
-            contentType: 'application/json',
-            requestContentType: 'application/json'
-        ]
- 
-    return params
-}
-
-def genDoorInfoReq()
-{
-    genDoorInfoReq(0)
-}
-
-def genDoorInfoReq(doorNum)
-{
-    // NOTE: do not change the order of these requests
-    //   add more at the end if needed
-    def req = """
+    if(body)
     {
-    "auth": {
-        "cik": "${getPortalKey()}",
-        "client_id": "${getDevices()[doorNum]}"
-    },
-    "calls": [
+        switch(type)
         {
-            "arguments": [
-                {
-                    "alias": "dps1.door_status"
-                },
-                {}
-            ],
-            "id": 1,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.name"
-                },
-                {}
-            ],
-            "id": 2,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.link_status"
-                },
-                {}
-            ],
-            "id": 3,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.door_status"
-                },
-                {}
-            ],
-            "id": 4,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.name"
-                },
-                {}
-            ],
-            "id": 5,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.link_status"
-                },
-                {}
-            ],
-            "id": 6,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.door_status"
-                },
-                {}
-            ],
-            "id": 7,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.name"
-                },
-                {}
-            ],
-            "id": 8,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.link_status"
-                },
-                {}
-            ],
-            "id": 9,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dcm.wifi_rssi"
-                },
-                {}
-            ],
-            "id": 10,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.battery_level"
-                },
-                {}
-            ],
-            "id": 11,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.ble_strength"
-                },
-                {}
-            ],
-            "id": 12,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps1.temperature"
-                },
-                {}
-            ],
-            "id": 13,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.battery_level"
-                },
-                {}
-            ],
-            "id": 14,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.ble_strength"
-                },
-                {}
-            ],
-            "id": 15,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps2.temperature"
-                },
-                {}
-            ],
-            "id": 16,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.battery_level"
-                },
-                {}
-            ],
-            "id": 17,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.ble_strength"
-                },
-                {}
-            ],
-            "id": 18,
-            "procedure": "read"
-        },
-        {
-            "arguments": [
-                {
-                    "alias": "dps3.temperature"
-                },
-                {}
-            ],
-            "id": 19,
-            "procedure": "read"
+            case "text":
+                params.body = toQueryString(body)
+                break
+            
+            case "json":
+                params.body = new groovy.json.JsonOutput().toJson(body)
+                break
         }
-    ]
     }
-    """
-    
-    return req    
+ 
+    return params
 }
 
-def httpGetExec(params, throwToCaller = false)
-{
-    logDebug("httpGetExec(${params})")
+def httpAccess(op, params)
+{    
+    def result = null
+    
+    logDebug("httpAccess(${op}, ${params})")
+    
+    def httpClosure = 
+    { resp ->
+        result = resp
+        logDebug("result.data = ${result.data}")
+    }
+    
+    def httpOp
+    
+    switch(op)
+    {
+        case "POST":
+            httpOp = this.delegate.&httpPost
+            break
+        case "GET":
+            httpOp = this.delegate.&httpGet
+            break
+    }
     
     try
     {
-        def result
-        httpGet(params)
-        { resp ->
-            if (resp.data)
-            {
-                logDebug("resp.data = ${resp.data}")
-                result = resp.data
-            }
-        }
-        return result
+        httpOp(params, httpClosure)
     }
-    catch (Exception e)
+    catch (groovyx.net.http.HttpResponseException e)
     {
-        logDebug("httpGetExec() failed: ${e.message}")
-        if(throwToCaller)
+        if(e.getResponse()?.getStatus()?.toInteger() == 401)
         {
-            throw(e)
+            // attempt to re-auth if necessary
+            login()
+            params['headers']['Authorization'] = "Bearer ${getToken()}"
+            
+            httpOp(params, httpClosure)
         }
     }
-
-}
-
-def httpPostExec(params, throwToCaller = false)
-{
-    logDebug("httpPostExec(${params})")
     
-    try
-    {
-        def result
-        httpPost(params)
-        { resp ->
-            if (resp.data)
-            {
-                logDebug("resp.data = ${resp.data}")
-                result = resp.data
-            }
-        }
-        return result
-    }
-    catch (Exception e)
-    {
-        logDebug("httpPostExec() failed: ${e.message}")
-        if(throwToCaller)
-        {
-            throw(e)
-        }
-    }
+    return result
 }

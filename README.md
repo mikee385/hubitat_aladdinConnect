@@ -1,8 +1,12 @@
 # hubitat_aladdinConnect
 
-This provides GarageDoorControl, SignalStrength (BLE door sensor), and SignalStrength (wifi main unit) driver capabilities for Hubitat with Genie Aladdin Connect garage door openers.
+This package provides driver capabilities for Hubitat with Genie Aladdin Connect systems: GarageDoorControl; SignalStrength (as rssi for the BLE door sensor); and Battery (as % for the BLE door sensor) .
 
-Note that all operations have a cloud (internet) interaction.  This implementation is based on the work shared here:  https://documenter.getpostman.com/view/5856894/RzZAjHxV?version=latest
+Version 2.0 and later of this driver are using the new Aladdin Connect API, which began rolling out in late 2021 and broke compatibility with 1.x versions of this driver.  **Note: if you are currently using version 1.x version of this driver**, you will need to delete and re-create your virtual devices after upgrading to version 2.0 or later.
+
+This was used as a reference for basic API operations: https://github.com/shoejosh/aladdin-connect
+
+This new implementation also utilizes a websocket interface for faster status updates without polling, with great thanks to @mike-s123 for doing the research and documenting that interface.  Polled refreshes are now only necessary for SignalStrength and Battery level.
 
 # Installation instructions:
 
