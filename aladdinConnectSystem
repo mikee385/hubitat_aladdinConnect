@@ -403,12 +403,12 @@ def manageDoorDevice(door)
     // use existing child, or create it
     def child = 
         getChildDevice(childDoorName(door)) ?: 
-        addChildDevice("Aladdin Connect Garage Door", childDoorName(door), [label:door.name, isComponent:false, name:"${childDoorName(door)}"])
+        addChildDevice("Aladdin Connect Garage Door", childDoorName(door), [label:door.name, isComponent:false, name:"Aladdin Connect Garage Door"])
 }
 
 def childDoorName(door)
 {
-    return "${door.legacy_id}-${door.door_number}"
+    return "AladdinConnectGarageDoor-${door.door_number}"
 }
 
 String toQueryString(Map m)
